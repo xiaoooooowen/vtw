@@ -1,0 +1,11 @@
+# VTW 依赖列表
+
+# 核心依赖
+yt-dlp>=2024.1.0
+faster-whisper>=1.0.0
+
+# 大模型校验（可选）
+openai>=1.0.0
+
+# HTTP 请求
+requests>=2.31.0

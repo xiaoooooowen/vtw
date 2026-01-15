@@ -1,0 +1,29 @@
+{
+  "output_dir": "output",
+  "whisper": {
+    "model": "base",
+    "device": "cpu",
+    "compute_type": "int8",
+    "language": "zh"
+  },
+  "llm": {
+    "enabled": false,
+    "provider": "deepseek",
+    "api_key": "",
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat"
+  },
+  "bilibili": {
+    "cookies": "",
+    "timeout": 30
+  },
+  "processing": {
+    "max_workers": 1,
+    "retry_count": 3,
+    "delay_between_requests": 1
+  },
+  "markdown": {
+    "include_metadata": true,
+    "sanitize_filename": true
+  }
+}
