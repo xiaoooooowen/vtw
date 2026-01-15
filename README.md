@@ -6,6 +6,8 @@
 
 - **双模式文字提取**：优先下载 B站字幕，无字幕时使用语音识别
 - **本地语音识别**：使用 faster-whisper，免费、准确
+- **繁体转简体**：自动将繁体字转换为简体字（可配置）
+- **智能段落排版**：基于语音停顿智能组织段落（可配置）
 - **大模型校验**（可选）：支持 DeepSeek、OpenAI 等大模型 API 优化识别结果
 - **批量处理**：支持获取 UP 主所有视频并批量转换
 - **智能命名**：自动清理文件名，避免冲突
@@ -35,9 +37,21 @@ pip install -r requirements.txt
     "enabled": false,
     "provider": "deepseek",
     "api_key": "your-api-key"
+  },
+  "markdown": {
+    "include_metadata": true,
+    "sanitize_filename": true,
+    "convert_to_simplified": true,
+    "format_paragraphs": true
   }
 }
 ```
+
+### Markdown 配置说明
+
+- **繁体转简体**：自动将繁体字转换为简体字
+- **智能段落排版**：基于语音停顿智能组织段落（保留换行，提高可读性）
+- 可通过配置文件控制是否启用此功能
 
 ### 使用示例
 
@@ -90,6 +104,7 @@ python src/vtw.py https://www.bilibili.com/video/BV1xx411c7mD --asr
 ```
 
 支持的大模型：
+
 - **DeepSeek**: 默认推荐，性价比高
 - **OpenAI**: 设置 `base_url` 为 `https://api.openai.com/v1`
 - 其他兼容 OpenAI API 的服务
@@ -106,7 +121,7 @@ python src/vtw.py https://www.bilibili.com/video/BV1xx411c7mD --asr
 - **视频链接**: https://www.bilibili.com/video/BV...
 - **上传时间**: 2024-01-15
 - **时长**: 10:30
-- **来源**: 字幕 / 语音识别
+- **来源**: 字幕 / 语音识别（带简体转换和段落排版）
 - **校验**: 已校验（可选）
 
 ## 转写文本
@@ -143,14 +158,20 @@ vtw/
 ├── models/              # Whisper 模型缓存
 ├── config.json          # 配置文件
 ├── requirements.txt     # 依赖列表
-└── README.md           # 本文档
+├── README.md           # 本文档
+└── CHANGELOG.md        # 开发日志
 ```
+
+## 开发日志
+
+详细的开发过程、问题记录和解决方案请参考 [CHANGELOG.md](CHANGELOG.md)
 
 ## 常见问题
 
 ### 1. yt-dlp 下载失败？
 
 确保安装了最新版本：
+
 ```bash
 pip install --upgrade yt-dlp
 ```
@@ -158,6 +179,7 @@ pip install --upgrade yt-dlp
 ### 2. Whisper 模型下载很慢？
 
 模型会从 Hugging Face 下载，可以设置镜像：
+
 ```python
 # models 目录下设置环境变量
 export HF_ENDPOINT=https://hf-mirror.com
@@ -172,6 +194,16 @@ export HF_ENDPOINT=https://hf-mirror.com
 ### 4. 大模型校验失败？
 
 检查 API Key 是否正确，网络是否通畅。
+
+### 5. 繁体字未转换为简体？
+
+确保安装了 opencc 库：
+
+```bash
+pip install opencc
+```
+
+并在 `config.json` 中设置 `"convert_to_simplified": true`。
 
 ## 许可证
 

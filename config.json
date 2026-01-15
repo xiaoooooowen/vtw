@@ -24,6 +24,8 @@
   },
   "markdown": {
     "include_metadata": true,
-    "sanitize_filename": true
+    "sanitize_filename": true,
+    "convert_to_simplified": true,
+    "format_paragraphs": true
   }
 }

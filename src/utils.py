@@ -339,13 +339,14 @@ def convert_to_simplified(text: str) -> str:
         return text
 
 
-def group_segments_to_paragraphs(segments: List[Dict], max_gap: float = 2.0) -> str:
+def group_segments_to_paragraphs(segments: List[Dict], max_gap: float = 1.5, paragraph_length: int = 300) -> str:
     """
     将 Whisper 的分段信息组织成段落
 
     Args:
         segments: Whisper 分段列表，每个包含 start, end, text
         max_gap: 最大时间间隔（秒），超过此间隔则新起段落
+        paragraph_length: 每个段落的字符数目标
 
     Returns:
         组织成段落的文本
@@ -354,31 +355,42 @@ def group_segments_to_paragraphs(segments: List[Dict], max_gap: float = 2.0) -> 
         return ''
 
     paragraphs = []
-    current_paragraph_segments = []
+    current_chars = 0
+    current_lines = []
 
     for i, segment in enumerate(segments):
         text = segment['text'].strip()
         if not text:
             continue
 
-        current_paragraph_segments.append(text)
-
         # 检查是否需要新起段落
+        should_break = False
+
+        # 基于时间间隔的判断（语音停顿超过阈值）
         if i < len(segments) - 1:
             next_segment = segments[i + 1]
             gap = next_segment['start'] - segment['end']
+            if gap > max_gap and current_chars > 50:  # 至少有一些内容才分段
+                should_break = True
 
-            # 如果间隔超过阈值，或者有明显的话题转换标志，则新起段落
-            if gap > max_gap:
-                paragraph = ' '.join(current_paragraph_segments)
-                if paragraph:
-                    paragraphs.append(paragraph)
-                current_paragraph_segments = []
+        # 基于段落长度的判断（避免段落过长）
+        if current_chars + len(text) > paragraph_length:
+            should_break = True
+
+        if should_break:
+            if current_lines:
+                # 将多行合并成一个段落，保留换行以提高可读性
+                paragraph = '\n'.join(current_lines)
+                paragraphs.append(paragraph.strip())
+                current_lines = []
+                current_chars = 0
+
+        current_lines.append(text)
+        current_chars += len(text)
 
     # 添加最后一个段落
-    if current_paragraph_segments:
-        paragraph = ' '.join(current_paragraph_segments)
-        if paragraph:
-            paragraphs.append(paragraph)
+    if current_lines:
+        paragraph = '\n'.join(current_lines)
+        paragraphs.append(paragraph.strip())
 
     return '\n\n'.join(paragraphs)
