@@ -82,6 +82,10 @@ class Config:
         dir_path.mkdir(parents=True, exist_ok=True)
         return dir_path
 
+    def set_output_dir(self, path: str):
+        """设置输出目录"""
+        self.set('output_dir', path)
+
     @property
     def models_dir(self) -> Path:
         """获取模型缓存目录"""
