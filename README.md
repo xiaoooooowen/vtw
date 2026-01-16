@@ -184,9 +184,6 @@ vtw/
 │   ├── verifier.py      # 大模型校验 & 知识模式
 │   ├── gui.py           # 图形界面
 │   └── utils.py         # 工具函数
-├── docs/                   # 文档目录
-│   ├── GUI.md          # 图形界面使用说明
-│   └── CHANGELOG.md     # 开发日志
 ├── output/              # 输出目录（生成的 Markdown 文件）
 ├── models/              # Whisper 模型缓存目录
 ├── config.example.json  # 配置模板
