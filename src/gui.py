@@ -375,12 +375,55 @@ class VTWGUI:
                 # UP 主模式
                 self.update_progress(40, "正在获取 UP 主视频列表...")
 
+                # 检查 URL 格式是否有效
+                from utils import extract_uid
+                uid = extract_uid(url)
+                if not uid:
+                    self.log("错误: 无法解析 UP 主 URL")
+                    self.log("提示: 请确保 URL 格式正确")
+                    self.log("  支持的格式:")
+                    self.log("  - https://space.bilibili.com/数字")
+                    self.log("  - https://space.bilibili.com/@用户名")
+                    messagebox.showerror(
+                        "URL 格式错误",
+                        "无法解析 UP 主 URL\n\n"
+                        "请确保 URL 格式正确，支持的格式：\n"
+                        "• https://space.bilibili.com/123456\n"
+                        "• https://space.bilibili.com/@username"
+                    )
+                    self._finish_processing()
+                    return
+
+                self.log(f"已解析 UP 主 UID: {uid}")
+
                 from subtitle import get_up_videos
                 videos = get_up_videos(url, args.limit if hasattr(args, 'limit') else None)
 
                 if not videos:
                     self.log("错误: 未找到视频")
-                    messagebox.showerror("错误", "未找到视频，请检查 URL 是否正确")
+                    self.log("可能原因:")
+                    self.log("  1. UP 主没有公开的视频")
+                    self.log("  2. 需要登录才能查看（需要配置 cookies）")
+                    self.log("  3. API 请求受限")
+                    self.log("  4. 网络连接问题")
+                    self.log("")
+                    self.log("解决方案:")
+                    self.log("  1. 在浏览器登录 B站")
+                    self.log("  2. 使用浏览器扩展（如 Get cookies.txt）导出 cookies")
+                    self.log("  3. 在配置文件 config.json 中设置 bilibili.cookies")
+                    self.log("")
+                    messagebox.showerror(
+                        "未找到视频",
+                        "未找到该 UP 主的视频\n\n"
+                        "可能原因：\n"
+                        "• UP 主没有公开的视频\n"
+                        "• 需要登录才能查看（需要配置 cookies）\n"
+                        "• API 请求受限\n\n"
+                        "解决方案：\n"
+                        "1. 在浏览器登录 B站\n"
+                        "2. 使用浏览器扩展导出 cookies\n"
+                        "3. 在配置文件中设置 bilibili.cookies"
+                    )
                     self._finish_processing()
                     return
 

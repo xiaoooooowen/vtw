@@ -207,60 +207,89 @@ def get_up_videos(up_url: str, limit: Optional[int] = None) -> List[Dict]:
         视频信息列表
     """
     from utils import extract_uid
-    import requests
-    import time
 
     uid = extract_uid(up_url)
     if not uid:
         logger.error(f"无法从 URL 中提取 UID: {up_url}")
         return []
 
-    videos = []
-    page = 1
+    # 清理 URL，使用纯数字格式
+    space_url = f"https://space.bilibili.com/{uid}"
 
     logger.info(f"正在获取 UP 主视频列表: {up_url} (UID: {uid})")
 
-    while True:
-        api_url = f"https://api.bilibili.com/x/space/arc/search"
-        params = {
-            'mid': uid,
-            'ps': 30,  # 每页数量
-            'pn': page,
-            'order': 'pubdate',  # 按发布时间排序
+    videos = []
+
+    try:
+        if yt_dlp is None:
+            raise ImportError("请安装 yt-dlp: pip install yt-dlp")
+
+        # 配置 yt-dlp 选项
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,  # 获取完整信息以获得标题
+            'ignoreerrors': True,
+            'download': False,
+            # 添加用户代理
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
 
-        try:
-            response = requests.get(api_url, params=params, timeout=10)
-            data = response.json()
+        # 如果配置了 cookies，添加到选项中
+        cookies = config.bilibili_cookies
+        if cookies:
+            if Path(cookies).exists():
+                ydl_opts['cookiefile'] = str(cookies)
+                logger.info("使用配置的 cookies 文件")
+            else:
+                # 尝试直接使用 cookies 字符串
+                ydl_opts['cookiefile'] = cookies
+                logger.info("使用配置的 cookies")
 
-            if data.get('code') != 0:
-                logger.error(f"获取视频列表失败: {data.get('message')}")
-                break
+        if limit:
+            ydl_opts['playlistend'] = limit
 
-            vlist = data.get('data', {}).get('list', {}).get('vlist', [])
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(space_url, download=False)
 
-            if not vlist:
-                break
+            if not info:
+                logger.error("无法获取 UP 主信息")
+                return []
 
-            for video in vlist:
+            entries = info.get('entries', [])
+            if not entries:
+                logger.info("未找到视频")
+                return []
+
+            for entry in entries:
+                if entry is None:
+                    continue
+
+                # 尝试从多个字段获取标题
+                title = (entry.get('title') or
+                         entry.get('alt_title') or
+                         entry.get('fulltitle') or
+                         '未命名')
+
                 videos.append({
-                    'id': video.get('bvid'),
-                    'title': video.get('title'),
-                    'url': f"https://www.bilibili.com/video/{video.get('bvid')}",
-                    'description': video.get('description', ''),
-                    'upload_date': video.get('created', ''),
-                    'duration': video.get('length', ''),
+                    'id': entry.get('id'),
+                    'title': title,
+                    'url': entry.get('url') or entry.get('webpage_url') or f"https://www.bilibili.com/video/{entry.get('id', '')}",
+                    'description': entry.get('description', ''),
+                    'upload_date': entry.get('upload_date', ''),
+                    'duration': entry.get('duration', 0),
                 })
 
-                if limit and len(videos) >= limit:
-                    return videos[:limit]
+        logger.info(f"共获取到 {len(videos)} 个视频")
+        return videos
 
-            page += 1
-            time.sleep(0.5)  # 避免请求过快
-
-        except Exception as e:
-            logger.error(f"请求失败: {e}")
-            break
-
-    logger.info(f"共获取到 {len(videos)} 个视频")
-    return videos
+    except Exception as e:
+        error_msg = str(e)
+        # 检查是否是请求被拒绝的错误
+        if '352' in error_msg or 'rejected' in error_msg.lower():
+            logger.error("获取视频列表失败: 请求被拒绝")
+            logger.error("提示: 请在配置文件中添加 B站 cookies")
+            logger.error("cookies 获取方法: 在浏览器登录 B站后，使用浏览器扩展导出 cookies")
+        else:
+            logger.error(f"获取视频列表失败: {e}")
+        return []

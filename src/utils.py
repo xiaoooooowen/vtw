@@ -68,16 +68,68 @@ def extract_uid(url: str) -> Optional[str]:
         url: B站空间 URL
 
     Returns:
-        UID，如果提取失败返回 None
+        UID（数字），如果提取失败返回 None
     """
     # 匹配 space.bilibili.com/数字 格式
     match = re.search(r'space\.bilibili\.com/(\d+)', url)
     if match:
         return match.group(1)
 
+    # 匹配 space.bilibili.com/@用户名 格式，需要通过 API 获取 UID
+    match = re.search(r'space\.bilibili\.com/@([^/]+)', url)
+    if match:
+        username = match.group(1)
+        return get_uid_by_username(username)
+
     # 匹配纯数字
     match = re.search(r'/(\d+)$', url)
     return match.group(1) if match else None
+
+
+def get_uid_by_username(username: str) -> Optional[str]:
+    """
+    通过用户名获取对应的数字 UID
+
+    Args:
+        username: 用户名（不带 @ 符号）
+
+    Returns:
+        UID（数字），如果获取失败返回 None
+    """
+    try:
+        import requests
+
+        # 使用 B站 API 通过用户名获取用户信息
+        # 方法1: 使用搜索 API
+        api_url = "https://api.bilibili.com/x/web-interface/search/type"
+        params = {
+            'keyword': username,
+            'search_type': 'bili_user',
+        }
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://www.bilibili.com',
+        }
+
+        response = requests.get(api_url, params=params, headers=headers, timeout=10)
+        data = response.json()
+
+        if data.get('code') == 0:
+            results = data.get('data', {}).get('result', [])
+            if results:
+                # 找到匹配的用户，提取 mid（UID）
+                for user in results:
+                    if user.get('uname') == username:
+                        return str(user.get('mid'))
+
+        return None
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"通过用户名获取 UID 失败: {e}")
+        return None
 
 
 def format_duration(seconds: float) -> str:

@@ -43,3 +43,4 @@ models/
 # Config (contains API keys)
 config.json
 !config.example.json
+cookies.txt

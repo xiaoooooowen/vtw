@@ -133,9 +133,7 @@ python src/vtw.py https://www.bilibili.com/video/BV1xx411c7mD --asr
 | `show_chapter_summary` | 为每个章节添加小结（引用格式） |
 | `chapter_numbering` | 为章节添加编号（如 "### 1. 章节标题"） |
 
-**知识模式输出示例**：
 
-```markdown
 ## 内容总结
 
 本教程全面介绍了 Python 数据分析的核心技术...
