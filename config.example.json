@@ -7,14 +7,14 @@
     "language": "zh"
   },
   "llm": {
-    "enabled": true,
+    "enabled": false,
     "provider": "deepseek",
-    "api_key": "sk-89b66ad5234442ab97d2ff92de4f95be",
-    "base_url": "https://api.deepseek.com",
+    "api_key": "your-api-key-here",
+    "base_url": "https://api.deepseek.com/v1",
     "model": "deepseek-chat"
   },
   "knowledge_mode": {
-    "enabled": true,
+    "enabled": false,
     "add_summary_at_top": true,
     "show_chapter_summary": true,
     "chapter_numbering": true

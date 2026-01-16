@@ -154,6 +154,26 @@ class Config:
         """是否格式化为段落"""
         return self.get('markdown.format_paragraphs', True)
 
+    @property
+    def knowledge_mode_enabled(self) -> bool:
+        """是否启用知识模式"""
+        return self.get('knowledge_mode.enabled', False)
+
+    @property
+    def add_summary_at_top(self) -> bool:
+        """是否在开头添加总体总结"""
+        return self.get('knowledge_mode.add_summary_at_top', True)
+
+    @property
+    def show_chapter_summary(self) -> bool:
+        """是否显示章节小结"""
+        return self.get('knowledge_mode.show_chapter_summary', True)
+
+    @property
+    def chapter_numbering(self) -> bool:
+        """是否为章节添加编号"""
+        return self.get('knowledge_mode.chapter_numbering', True)
+
 
 # 全局配置实例
 config = Config()

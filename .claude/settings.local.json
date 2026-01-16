@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(dir:*)",
+      "Bash(move:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(setx:*)",
+      "Bash(\"C:\\\\Users\\\\27970\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\":*)"
+    ]
+  }
+}

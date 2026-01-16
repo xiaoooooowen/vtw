@@ -113,6 +113,11 @@ class MarkdownGenerator:
         lines.append(f"# {title}")
         lines.append("")
 
+        # 知识模式：在开头添加总体总结
+        if verification_info and verification_info.get('type') == 'knowledge':
+            if config.add_summary_at_top:
+                lines.extend(self._generate_summary_section(verification_info))
+
         # 元数据
         if self.include_metadata:
             lines.append("## 视频信息")
@@ -132,20 +137,70 @@ class MarkdownGenerator:
             lines.append(f"- **来源**: {'字幕' if source == 'subtitle' else '语音识别'}")
 
             if verification_info:
-                lines.append(f"- **校验**: {verification_info.get('changes', '已校验')}")
+                lines.append(f"- **处理模式**: {'知识模式' if verification_info.get('type') == 'knowledge' else '标准模式'}")
 
             lines.append("")
-            lines.append("## 转写文本")
+
+            # 知识模式的转写文本标题不同
+            if verification_info and verification_info.get('type') == 'knowledge':
+                lines.append("## 详细内容")
+            else:
+                lines.append("## 转写文本")
             lines.append("")
 
         # 正文
-        lines.append(text)
+        if verification_info and verification_info.get('type') == 'knowledge':
+            # 知识模式：生成结构化的章节内容
+            lines.extend(self._generate_knowledge_content(verification_info))
+        else:
+            # 标准模式：直接使用文本
+            lines.append(text)
+
         lines.append("")
         lines.append("---")
         lines.append("")
-        lines.append(f"本文档由 [VTW](https://github.com/yourusername/vtw) 生成")
+        lines.append(f"本文档由 [VTW](https://github.com/xiaoooooowen/vtw) 生成")
 
         return '\n'.join(lines)
+
+    def _generate_summary_section(self, verification_info: Dict) -> List[str]:
+        """生成总结部分（开头）"""
+        lines = []
+        summary = verification_info.get('summary')
+        if summary:
+            lines.append("## 内容总结")
+            lines.append("")
+            lines.append(summary)
+            lines.append("")
+        return lines
+
+    def _generate_knowledge_content(self, verification_info: Dict) -> List[str]:
+        """生成知识类章节内容"""
+        lines = []
+        chapters = verification_info.get('chapters', [])
+
+        for idx, chapter in enumerate(chapters, 1):
+            # 章节标题
+            title = chapter.get('title', '未命名章节')
+            if config.chapter_numbering:
+                lines.append(f"### {idx}. {title}")
+            else:
+                lines.append(f"### {title}")
+            lines.append("")
+
+            # 章节小结
+            if config.show_chapter_summary:
+                summary = chapter.get('summary', '')
+                if summary:
+                    lines.append(f"> {summary}")
+                    lines.append("")
+
+            # 章节内容
+            content = chapter.get('content', '')
+            lines.append(content)
+            lines.append("")
+
+        return lines
 
 
 class VideoProcessor:
@@ -227,11 +282,22 @@ class VideoProcessor:
         verification_info = None
         if self.verifier:
             logger.info("正在进行文本校验...")
-            verification_result = self.verifier.verify_text(text, video_info['title'])
+            video_description = video_info.get('description', '')
+            verification_result = self.verifier.verify_text(
+                text,
+                video_info['title'],
+                video_description
+            )
             if verification_result:
-                text = verification_result['text']
-                verification_info = verification_result
-                logger.info("✓ 校验完成")
+                # 知识模式：使用结构化数据，不覆盖原始文本
+                if verification_result.get('type') == 'knowledge':
+                    verification_info = verification_result
+                    logger.info(f"✓ 知识模式处理完成")
+                else:
+                    # 标准模式：使用校验后的文本
+                    text = verification_result['text']
+                    verification_info = verification_result
+                    logger.info("✓ 校验完成")
             else:
                 logger.info("跳过校验")
 

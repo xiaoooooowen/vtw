@@ -40,4 +40,6 @@ output/
 # Models
 models/
 
-CHANGELOG.md
+# Config (contains API keys)
+config.json
+!config.example.json
