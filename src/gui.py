@@ -5,6 +5,7 @@ VTW GUI - Bilibili 视频转文字工具图形界面
 """
 
 import sys
+import queue
 import threading
 import time
 import tkinter as tk
@@ -31,11 +32,18 @@ class VTWGUI:
         # 视频处理器
         self.processor = VideoProcessor()
 
+        # UI 事件队列（线程安全）
+        self.ui_queue = queue.Queue()
+        self._running = True
+
         # 创建 UI
         self.create_widgets()
 
         # 绑定关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # 启动 UI 队列处理循环
+        self.root.after(100, self._process_ui_queue)
 
     def create_widgets(self):
         """创建所有 UI 组件"""
@@ -267,24 +275,52 @@ class VTWGUI:
             os.startfile(config_path)
             self.log(f"已打开配置文件: {config_path}")
         except Exception as e:
-            messagebox.showerror("错误", f"无法打开配置文件:\n{e}")
+            self._show_messagebox("error", "错误", f"无法打开配置文件:\n{e}")
 
     def clear_log(self):
         """清空日志"""
         self.log_text.delete(1.0, tk.END)
         self.log("日志已清空")
 
+    def _schedule_ui(self, callback):
+        """将回调调度到主线程执行（线程安全）"""
+        self.root.after(0, callback)
+
+    def _process_ui_queue(self):
+        """在主线程消费 UI 事件队列"""
+        try:
+            while True:
+                action, args = self.ui_queue.get_nowait()
+                if action == 'log':
+                    self.log_text.insert(tk.END, f"{args[0]}\n")
+                    self.log_text.see(tk.END)
+                elif action == 'progress':
+                    self.progress_var.set(args[0])
+                    self.status_var.set(args[1])
+                elif action == 'messagebox_info':
+                    messagebox.showinfo(args[0], args[1])
+                elif action == 'messagebox_error':
+                    messagebox.showerror(args[0], args[1])
+                elif action == 'messagebox_warning':
+                    messagebox.showwarning(args[0], args[1])
+                self.ui_queue.task_done()
+        except queue.Empty:
+            pass
+        finally:
+            if self._running:
+                self.root.after(100, self._process_ui_queue)
+
     def log(self, message):
-        """添加日志信息"""
-        self.log_text.insert(tk.END, f"{message}\n")
-        self.log_text.see(tk.END)
-        self.root.update_idletasks()
+        """添加日志信息（线程安全）"""
+        self.ui_queue.put(('log', (message,)))
+
+    def _show_messagebox(self, mbox_type: str, title: str, msg: str):
+        """线程安全地显示消息框"""
+        self.ui_queue.put((f'messagebox_{mbox_type}', (title, msg)))
 
     def update_progress(self, value, status):
-        """更新进度"""
-        self.progress_var.set(value)
-        self.status_var.set(status)
-        self.root.update_idletasks()
+        """更新进度（线程安全）"""
+        self.ui_queue.put(('progress', (value, status)))
 
     def start_processing(self):
         """开始处理"""
@@ -292,12 +328,12 @@ class VTWGUI:
         output_dir = self.output_path_var.get().strip()
 
         if not url:
-            messagebox.showwarning("警告", "请输入视频或 UP 主空间 URL")
+            self._show_messagebox("warning", "警告", "请输入视频或 UP 主空间 URL")
             return
 
         # 验证输出目录
         if not output_dir:
-            messagebox.showwarning("警告", "请设置输出目录")
+            self._show_messagebox("warning", "警告", "请设置输出目录")
             return
 
         # 更新输出目录配置
@@ -346,14 +382,16 @@ class VTWGUI:
             downloader = SubtitleDownloader()
 
             # 判断是 UP 主还是单个视频
-            if '/video/' in url or 'BV' in url:
+            from utils import is_single_video_url
+
+            if is_single_video_url(url):
                 # 单个视频
                 self.update_progress(40, "正在处理单个视频...")
 
                 video_info = downloader.get_video_info(url)
                 if not video_info:
                     self.log("错误: 无法获取视频信息")
-                    messagebox.showerror("错误", "无法获取视频信息，请检查 URL 是否正确")
+                    self._show_messagebox("error", "错误", "无法获取视频信息，请检查 URL 是否正确")
                     self._finish_processing()
                     return
 
@@ -366,10 +404,11 @@ class VTWGUI:
                 if result:
                     self.update_progress(100, "处理完成！")
                     self.log("=" * 50)
-                    messagebox.showinfo("完成", "视频处理完成！")
+                    self.processor.cleanup()
+                    self._show_messagebox("info", "完成", "视频处理完成！")
                 else:
                     self.log("错误: 视频处理失败")
-                    messagebox.showerror("错误", "视频处理失败，请查看日志")
+                    self._show_messagebox("error", "错误", "视频处理失败，请查看日志")
 
             else:
                 # UP 主模式
@@ -384,7 +423,7 @@ class VTWGUI:
                     self.log("  支持的格式:")
                     self.log("  - https://space.bilibili.com/数字")
                     self.log("  - https://space.bilibili.com/@用户名")
-                    messagebox.showerror(
+                    self._show_messagebox("error",
                         "URL 格式错误",
                         "无法解析 UP 主 URL\n\n"
                         "请确保 URL 格式正确，支持的格式：\n"
@@ -412,7 +451,7 @@ class VTWGUI:
                     self.log("  2. 使用浏览器扩展（如 Get cookies.txt）导出 cookies")
                     self.log("  3. 在配置文件 config.json 中设置 bilibili.cookies")
                     self.log("")
-                    messagebox.showerror(
+                    self._show_messagebox("error",
                         "未找到视频",
                         "未找到该 UP 主的视频\n\n"
                         "可能原因：\n"
@@ -441,11 +480,12 @@ class VTWGUI:
 
                 self.update_progress(100, "批量处理完成！")
                 self.log("=" * 50)
-                messagebox.showinfo("完成", f"批量处理完成！成功处理 {len(videos)} 个视频")
+                self.processor.cleanup()
+                self._show_messagebox("info", "完成", f"批量处理完成！成功处理 {len(videos)} 个视频")
 
         except Exception as e:
             self.log(f"错误: {e}")
-            messagebox.showerror("错误", f"处理过程中发生错误:\n{e}")
+            self._show_messagebox("error", "错误", f"处理过程中发生错误:\n{e}")
         finally:
             self._finish_processing()
 
@@ -467,6 +507,7 @@ class VTWGUI:
         if hasattr(self, 'processing_thread') and self.processing_thread.is_alive():
             if not messagebox.askyesno("确认退出", "处理任务正在进行中，确定要退出吗？"):
                 return
+        self._running = False
         self.root.destroy()
 
 

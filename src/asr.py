@@ -4,6 +4,7 @@
 """
 
 import os
+import shutil
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List
@@ -15,22 +16,24 @@ except ImportError:
 
 from config import config
 
-# 设置 Hugging Face 镜像（国内用户）
-os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-
 logger = logging.getLogger(__name__)
 
 
 class ASREngine:
     """语音识别引擎"""
 
-    def __init__(self):
+    def __init__(self, config_obj=None):
         """初始化语音识别引擎"""
         if WhisperModel is None:
             raise ImportError("请安装 faster-whisper: pip install faster-whisper")
 
-        whisper_config = config.whisper_config
-        models_dir = config.models_dir
+        self.config = config_obj if config_obj is not None else config
+
+        # 设置 Hugging Face 镜像（仅在未设置时生效）
+        os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+
+        whisper_config = self.config.whisper_config
+        models_dir = self.config.models_dir
 
         logger.info(f"正在加载 Whisper 模型: {whisper_config['model']}")
         logger.info(f"设备: {whisper_config['device']}, 计算类型: {whisper_config['compute_type']}")
@@ -44,6 +47,12 @@ class ASREngine:
 
         self.language = whisper_config['language']
         logger.info("Whisper 模型加载完成")
+
+    def unload(self):
+        """卸载模型，释放内存"""
+        if hasattr(self, 'model') and self.model is not None:
+            self.model = None
+            logger.info("Whisper 模型已卸载")
 
     def transcribe_audio(
         self,
@@ -165,16 +174,13 @@ class BilibiliAudioExtractor:
 
         output_template = str(output_dir / f'{bvid}.%(ext)s')
 
-        # 查找 ffmpeg 路径
-        ffmpeg_path = None
-        possible_paths = [
-            r'C:\Users\27970\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin\ffmpeg.exe',
-            r'C:\Users\27970\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe',
-        ]
-        for path in possible_paths:
-            if Path(path).exists():
-                ffmpeg_path = path
-                break
+        # 查找 ffmpeg
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path:
+            logger.info(f"使用 ffmpeg: {ffmpeg_path}")
+        else:
+            logger.warning("未找到 ffmpeg，请确保已安装并添加到 PATH")
+            logger.warning("下载地址: https://ffmpeg.org/download.html")
 
         ydl_opts = {
             'quiet': False,
@@ -191,7 +197,6 @@ class BilibiliAudioExtractor:
 
         if ffmpeg_path:
             ydl_opts['ffmpeg_location'] = ffmpeg_path
-            logger.info(f"使用 ffmpeg: {ffmpeg_path}")
 
         try:
             logger.info(f"正在提取音频: {video_url}")

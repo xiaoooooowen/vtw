@@ -4,7 +4,6 @@
 """
 
 import re
-import time
 from pathlib import Path
 from typing import Optional, Dict, List
 from urllib.parse import urlparse
@@ -43,6 +42,16 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
         filename = filename[:max_length]
 
     return filename or 'unnamed'
+
+
+def is_single_video_url(url: str) -> bool:
+    """判断 URL 是否为单个视频（包含 /video/ 路径或 BV 号）"""
+    return '/video/' in url or 'BV' in url
+
+
+def is_up_space_url(url: str) -> bool:
+    """判断 URL 是否为 UP 主空间"""
+    return not is_single_video_url(url)
 
 
 def extract_bvid(url: str) -> Optional[str]:
@@ -170,32 +179,6 @@ def format_date(date_str: str) -> str:
     day = date_str[6:8]
 
     return f"{year}-{month}-{day}"
-
-
-def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
-    """
-    失败重试装饰器
-
-    Args:
-        max_retries: 最大重试次数
-        delay: 重试间隔（秒）
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            last_exception = None
-
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        time.sleep(delay)
-
-            raise last_exception
-
-        return wrapper
-    return decorator
 
 
 def generate_unique_filepath(directory: Path, filename: str) -> Path:
