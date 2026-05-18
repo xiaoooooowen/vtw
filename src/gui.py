@@ -277,7 +277,10 @@ class VTWGUI:
 
     def open_config(self):
         """打开配置文件"""
-        config_path = Path.cwd() / "config.json"
+        if getattr(sys, 'frozen', False):
+            config_path = Path(sys.executable).parent / 'config.json'
+        else:
+            config_path = Path(__file__).parent.parent / 'config.json'
         try:
             import os
             os.startfile(config_path)
@@ -522,9 +525,32 @@ class VTWGUI:
         self.root.destroy()
 
 
+def _init_config():
+    """初始化配置文件，首次运行自动从模板创建"""
+    import os
+    import shutil
+
+    # PyInstaller: sys._MEIPASS 是解压目录；常规运行: 脚本所在目录
+    if getattr(sys, 'frozen', False):
+        app_dir = Path(sys.executable).parent
+        bundle_dir = Path(sys._MEIPASS)
+    else:
+        app_dir = Path(__file__).parent.parent
+        bundle_dir = app_dir
+
+    config_path = app_dir / 'config.json'
+    example_path = bundle_dir / 'config.example.json'
+
+    if not config_path.exists() and example_path.exists():
+        shutil.copy(example_path, config_path)
+
+
 def main():
     """主函数"""
+    _init_config()
+
     root = tk.Tk()
+    root.title("VTW - Bilibili 视频转文字工具")
 
     # 设置样式
     style = ttk.Style()
