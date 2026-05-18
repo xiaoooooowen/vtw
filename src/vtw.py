@@ -280,16 +280,29 @@ class VideoProcessor:
 
         # 如果没有字幕或强制使用 ASR（subtitle-only 模式跳过）
         if use_asr and not subtitle_only:
-            if self.asr_engine is None:
-                logger.info("初始化语音识别引擎...")
-                self.asr_engine = ASREngine()
+            try:
+                if self.asr_engine is None:
+                    logger.info("初始化语音识别引擎...")
+                    self.asr_engine = ASREngine()
 
-            logger.info("正在进行语音识别...")
-            result = transcribe_video(
-                video_url,
-                self.config.output_dir,
-                self.asr_engine
-            )
+                logger.info("正在进行语音识别...")
+                result = transcribe_video(
+                    video_url,
+                    self.config.output_dir,
+                    self.asr_engine
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if 'Hub' in error_msg or 'HuggingFace' in error_msg or 'hf-mirror' in error_msg:
+                    logger.error(
+                        "Whisper 模型下载失败，可能是网络不通。"
+                        "解决方法：1) 确保网络可访问 HuggingFace "
+                        "2) 手动下载模型放到 models/ 目录 "
+                        "3) 使用 --subtitle-only 模式"
+                    )
+                else:
+                    logger.error(f"语音识别失败: {e}")
+                result = None
 
             if result:
                 text = result.get('text', '')
