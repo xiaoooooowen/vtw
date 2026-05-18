@@ -6,7 +6,7 @@ pip install pyinstaller -q
 
 echo.
 echo Building VTW.exe...
-python -m PyInstaller --onefile --windowed --name VTW --add-data "config.example.json;." src/gui.py
+python -m PyInstaller --onefile --windowed --name VTW --add-data "config.example.json;." --paths src src/gui.py
 
 echo.
 echo Done! VTW.exe is in the dist\ folder.
