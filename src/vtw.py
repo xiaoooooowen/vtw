@@ -7,6 +7,7 @@ VTW - Bilibili 视频转文字工具
 import sys
 import argparse
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -216,6 +217,7 @@ class VideoProcessor:
         self.asr_engine = None  # 延迟加载
         self.verifier = create_verifier(self.config)
         self.md_generator = MarkdownGenerator(self.config)
+        self.stop_event = threading.Event()
 
     def get_video_info(self, video_url: str) -> Optional[Dict]:
         """获取视频信息（委托给 SubtitleDownloader）"""
@@ -230,7 +232,8 @@ class VideoProcessor:
     def process_video(
         self,
         video_info: Dict,
-        use_asr: bool = False
+        use_asr: bool = False,
+        subtitle_only: bool = False
     ) -> bool:
         """
         处理单个视频
@@ -238,6 +241,7 @@ class VideoProcessor:
         Args:
             video_info: 视频信息
             use_asr: 是否强制使用语音识别
+            subtitle_only: 仅提取字幕，跳过 ASR 和 LLM
 
         Returns:
             处理是否成功
@@ -266,18 +270,39 @@ class VideoProcessor:
                 logger.info("✗ 无可用字幕，将使用语音识别")
                 use_asr = True
 
-        # 如果没有字幕或强制使用 ASR
-        if use_asr:
-            if self.asr_engine is None:
-                logger.info("初始化语音识别引擎...")
-                self.asr_engine = ASREngine()
+        if self.stop_event.is_set():
+            logger.info("用户请求停止，跳过当前视频")
+            return False
 
-            logger.info("正在进行语音识别...")
-            result = transcribe_video(
-                video_url,
-                self.config.output_dir,
-                self.asr_engine
-            )
+        if subtitle_only and not text:
+            logger.info("✗ 无可用字幕（subtitle-only 模式不启用 ASR）")
+            return False
+
+        # 如果没有字幕或强制使用 ASR（subtitle-only 模式跳过）
+        if use_asr and not subtitle_only:
+            try:
+                if self.asr_engine is None:
+                    logger.info("初始化语音识别引擎...")
+                    self.asr_engine = ASREngine()
+
+                logger.info("正在进行语音识别...")
+                result = transcribe_video(
+                    video_url,
+                    self.config.output_dir,
+                    self.asr_engine
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if 'Hub' in error_msg or 'HuggingFace' in error_msg or 'hf-mirror' in error_msg:
+                    logger.error(
+                        "Whisper 模型下载失败，可能是网络不通。"
+                        "解决方法：1) 确保网络可访问 HuggingFace "
+                        "2) 手动下载模型放到 models/ 目录 "
+                        "3) 使用 --subtitle-only 模式"
+                    )
+                else:
+                    logger.error(f"语音识别失败: {e}")
+                result = None
 
             if result:
                 text = result.get('text', '')
@@ -292,9 +317,13 @@ class VideoProcessor:
             logger.error("✗ 未能获取文本内容")
             return False
 
-        # 大模型校验
+        if self.stop_event.is_set():
+            logger.info("用户请求停止，跳过 LLM 处理")
+            return False
+
+        # 大模型校验（subtitle-only 模式跳过）
         verification_info = None
-        if self.verifier:
+        if not subtitle_only and self.verifier and not self.stop_event.is_set():
             logger.info("正在进行文本校验...")
             video_description = video_info.get('description', '')
             verification_result = self.verifier.verify_text(
@@ -329,7 +358,9 @@ class VideoProcessor:
     def process_videos(
         self,
         videos: List[Dict],
-        force_asr: bool = False
+        force_asr: bool = False,
+        subtitle_only: bool = False,
+        no_resume: bool = False
     ) -> Dict[str, int]:
         """
         批量处理视频
@@ -337,26 +368,78 @@ class VideoProcessor:
         Args:
             videos: 视频列表
             force_asr: 是否强制使用语音识别
+            subtitle_only: 仅提取字幕
+            no_resume: 禁用断点续传
 
         Returns:
             处理统计信息
         """
+        import json
+
         total = len(videos)
         success = 0
         failed = 0
+        failed_list = []
         max_workers = self.config.max_workers
 
+        # 断点续传：加载已完成的视频
+        progress_file = self.config.output_dir / '.vtw_progress.json'
+        completed_urls = set()
+        if not no_resume and progress_file.exists():
+            try:
+                progress_data = json.loads(progress_file.read_text(encoding='utf-8'))
+                completed_urls = set(progress_data.get('completed', []))
+                skipped = sum(1 for v in videos if v.get('url') in completed_urls)
+                if skipped > 0:
+                    logger.info(f"断点续传: 跳过 {skipped} 个已完成的视频")
+            except Exception as e:
+                logger.warning(f"读取进度文件失败，将重新处理全部: {e}")
+
         logger.info(f"\n开始处理 {total} 个视频（max_workers={max_workers}）...")
+
+        def save_progress():
+            if no_resume:
+                return
+            completed = list(completed_urls)
+            try:
+                progress_file.write_text(
+                    json.dumps({'completed': completed}, ensure_ascii=False),
+                    encoding='utf-8'
+                )
+            except Exception as e:
+                logger.warning(f"保存进度文件失败: {e}")
+
+        def handle_result(video, result):
+            nonlocal success, failed
+            if result:
+                success += 1
+                url = video.get('url', '')
+                if url:
+                    completed_urls.add(url)
+                    save_progress()
+            else:
+                failed += 1
+                failed_list.append({
+                    'title': video.get('title', ''),
+                    'url': video.get('url', ''),
+                    'reason': '处理失败',
+                })
 
         if max_workers <= 1:
             # 串行处理
             for idx, video in enumerate(videos, 1):
+                if self.stop_event.is_set():
+                    logger.info("用户请求停止，结束批处理")
+                    break
+                video_url = video.get('url', '')
+                if video_url in completed_urls:
+                    logger.info(f"\n[{idx}/{total}] 跳过（已完成）: {video.get('title', '')}")
+                    success += 1
+                    continue
                 logger.info(f"\n[{idx}/{total}]")
                 try:
-                    if self.process_video(video, force_asr):
-                        success += 1
-                    else:
-                        failed += 1
+                    result = self.process_video(video, force_asr, subtitle_only)
+                    handle_result(video, result)
                     if idx < total:
                         delay = self.config.delay_between_requests
                         if delay > 0:
@@ -367,29 +450,52 @@ class VideoProcessor:
                 except Exception as e:
                     logger.error(f"处理出错: {e}")
                     failed += 1
+                    failed_list.append({
+                        'title': video.get('title', ''),
+                        'url': video.get('url', ''),
+                        'reason': str(e),
+                    })
                     continue
         else:
-            # 并发处理
+            # 并发处理：过滤已完成的视频
+            pending_videos = [
+                v for v in videos if v.get('url') not in completed_urls
+            ]
+            already_done = len(videos) - len(pending_videos)
+            success += already_done
+            if already_done > 0:
+                logger.info(f"断点续传: 跳过 {already_done} 个已完成的视频")
+
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_video = {
-                    executor.submit(self.process_video, video, force_asr): video
-                    for video in videos
+                    executor.submit(self.process_video, video, force_asr, subtitle_only): video
+                    for video in pending_videos
                 }
                 for future in as_completed(future_to_video):
                     video = future_to_video[future]
                     try:
-                        if future.result():
-                            success += 1
-                        else:
-                            failed += 1
+                        result = future.result()
+                        handle_result(video, result)
                     except Exception as e:
                         logger.error(f"处理出错 [{video.get('title', '')}]: {e}")
                         failed += 1
+                        failed_list.append({
+                            'title': video.get('title', ''),
+                            'url': video.get('url', ''),
+                            'reason': str(e),
+                        })
+
+        # 输出失败汇总
+        self._write_failed_report(failed_list)
 
         logger.info(f"\n{'='*60}")
         logger.info(f"处理完成！")
         logger.info(f"  成功: {success}")
         logger.info(f"  失败: {failed}")
+        if failed_list:
+            logger.info(f"  失败列表:")
+            for item in failed_list:
+                logger.info(f"    - {item['title']}: {item['reason']}")
         logger.info(f"{'='*60}\n")
 
         return {
@@ -397,6 +503,21 @@ class VideoProcessor:
             'success': success,
             'failed': failed,
         }
+
+    def _write_failed_report(self, failed_list: list):
+        """将失败列表写入 JSON 文件"""
+        if not failed_list:
+            return
+        import json
+        report_path = self.config.output_dir / '_failed.json'
+        try:
+            report_path.write_text(
+                json.dumps(failed_list, ensure_ascii=False, indent=2),
+                encoding='utf-8'
+            )
+            logger.info(f"失败报告已保存: {report_path}")
+        except Exception as e:
+            logger.warning(f"写入失败报告出错: {e}")
 
 
 def main():
@@ -443,6 +564,21 @@ def main():
         action='store_true',
         help='显示详细日志'
     )
+    parser.add_argument(
+        '-y', '--yes',
+        action='store_true',
+        help='跳过确认提示，直接开始处理'
+    )
+    parser.add_argument(
+        '--subtitle-only',
+        action='store_true',
+        help='仅提取字幕，不启用 ASR 和大模型处理'
+    )
+    parser.add_argument(
+        '--no-resume',
+        action='store_true',
+        help='禁用断点续传，重新处理全部视频'
+    )
 
     args = parser.parse_args()
 
@@ -468,7 +604,7 @@ def main():
                 logger.error("无法获取视频信息")
                 sys.exit(1)
 
-            result = processor.process_video(video_info, args.asr)
+            result = processor.process_video(video_info, args.asr, args.subtitle_only)
 
             if result:
                 logger.info("✓ 处理成功")
@@ -489,15 +625,18 @@ def main():
                 sys.exit(1)
 
             # 确认
-            print(f"\n即将处理 {len(videos)} 个视频，继续吗？")
-            confirm = input("输入 'yes' 继续: ")
-            if confirm.lower() != 'yes':
-                print("已取消")
-                sys.exit(0)
+            if not args.yes:
+                print(f"\n即将处理 {len(videos)} 个视频，继续吗？")
+                confirm = input("输入 'yes' 继续: ")
+                if confirm.lower() != 'yes':
+                    print("已取消")
+                    sys.exit(0)
 
             # 批量处理
             processor = VideoProcessor()
-            stats = processor.process_videos(videos, args.asr)
+            stats = processor.process_videos(
+                videos, args.asr, args.subtitle_only, args.no_resume
+            )
 
             if stats['failed'] == 0:
                 sys.exit(0)

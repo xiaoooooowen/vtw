@@ -115,6 +115,14 @@ class VTWGUI:
         )
         asr_check.pack(side=tk.LEFT)
 
+        self.subtitle_only_var = tk.BooleanVar(value=False)
+        subtitle_only_check = ttk.Checkbutton(
+            asr_frame,
+            text="仅提取字幕（跳过 ASR 和 AI 处理）",
+            variable=self.subtitle_only_var
+        )
+        subtitle_only_check.pack(side=tk.LEFT, padx=10)
+
         # === 配置区 ===
         config_frame = ttk.LabelFrame(main_frame, text="快速配置", padding="10")
         config_frame.pack(fill=tk.X, pady=(0, 10))
@@ -354,6 +362,7 @@ class VTWGUI:
 
     def _process_video(self, url):
         """在单独的线程中处理视频"""
+        self.processor.stop_event.clear()
         try:
             # 解析命令行参数
             self.update_progress(10, "正在解析 URL...")
@@ -399,7 +408,9 @@ class VTWGUI:
                 self.update_progress(50, "正在提取文字...")
 
                 # 处理视频（模拟主程序逻辑）
-                result = self.processor.process_video(video_info, self.asr_var.get())
+                result = self.processor.process_video(
+                    video_info, self.asr_var.get(), self.subtitle_only_var.get()
+                )
 
                 if result:
                     self.update_progress(100, "处理完成！")
@@ -474,7 +485,9 @@ class VTWGUI:
                     progress = 40 + (60 * idx // total)
                     self.update_progress(progress, f"正在处理 [{idx}/{total}] {video.get('title', '')}")
 
-                    result = self.processor.process_video(video, self.asr_var.get())
+                    result = self.processor.process_video(
+                        video, self.asr_var.get(), self.subtitle_only_var.get()
+                    )
                     if not result:
                         self.log(f"警告: 视频处理失败 - {video.get('title', '')}")
 
@@ -491,11 +504,9 @@ class VTWGUI:
 
     def stop_processing(self):
         """停止处理"""
-        self.log("用户请求停止处理...")
-        # 注意: 实际停止需要更复杂的实现
-        # 这里只是标记停止状态
-        messagebox.showinfo("提示", "停止功能正在开发中，当前无法真正停止运行中的任务")
-        self._finish_processing()
+        self.log("用户请求停止处理，正在终止...")
+        self.processor.stop_event.set()
+        self.stop_btn.config(state=tk.DISABLED)
 
     def _finish_processing(self):
         """处理完成"""
