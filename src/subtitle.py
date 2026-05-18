@@ -14,7 +14,7 @@ except ImportError:
     yt_dlp = None
 
 from config import config
-from utils import extract_bvid, merge_subtitles, retry_on_failure
+from utils import extract_bvid, merge_subtitles
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,12 @@ logger = logging.getLogger(__name__)
 class SubtitleDownloader:
     """字幕下载器"""
 
-    def __init__(self):
+    def __init__(self, config_obj=None):
         """初始化字幕下载器"""
         if yt_dlp is None:
             raise ImportError("请安装 yt-dlp: pip install yt-dlp")
+
+        self.config = config_obj if config_obj is not None else config
 
         self.ydl_opts = {
             'quiet': False,
@@ -39,7 +41,7 @@ class SubtitleDownloader:
         }
 
         # 如果配置了 cookies，添加到选项中
-        cookies = config.bilibili_cookies
+        cookies = self.config.bilibili_cookies
         if cookies:
             self.ydl_opts['cookiefile'] = cookies
 

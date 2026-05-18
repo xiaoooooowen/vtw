@@ -8,6 +8,7 @@ import sys
 import argparse
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -22,6 +23,7 @@ from utils import (
     generate_unique_filepath,
     convert_to_simplified,
     group_segments_to_paragraphs,
+    is_single_video_url,
 )
 from subtitle import SubtitleDownloader, get_up_videos
 from asr import ASREngine, transcribe_video
@@ -38,13 +40,14 @@ logger = logging.getLogger(__name__)
 class MarkdownGenerator:
     """Markdown 文档生成器"""
 
-    def __init__(self):
+    def __init__(self, config_obj=None):
         """初始化生成器"""
-        self.output_dir = config.output_dir
-        self.include_metadata = config.include_metadata
-        self.sanitize_filename = config.sanitize_filename
-        self.convert_to_simplified = getattr(config, 'convert_to_simplified', True)
-        self.format_paragraphs = getattr(config, 'format_paragraphs', True)
+        self.config = config_obj if config_obj is not None else config
+        self.output_dir = self.config.output_dir
+        self.include_metadata = self.config.include_metadata
+        self.sanitize_filename = self.config.sanitize_filename
+        self.convert_to_simplified = getattr(self.config, 'convert_to_simplified', True)
+        self.format_paragraphs = getattr(self.config, 'format_paragraphs', True)
 
     def generate(
         self,
@@ -115,7 +118,7 @@ class MarkdownGenerator:
 
         # 知识模式：在开头添加总体总结
         if verification_info and verification_info.get('type') == 'knowledge':
-            if config.add_summary_at_top:
+            if self.config.add_summary_at_top:
                 lines.extend(self._generate_summary_section(verification_info))
 
         # 元数据
@@ -182,14 +185,14 @@ class MarkdownGenerator:
         for idx, chapter in enumerate(chapters, 1):
             # 章节标题
             title = chapter.get('title', '未命名章节')
-            if config.chapter_numbering:
+            if self.config.chapter_numbering:
                 lines.append(f"### {idx}. {title}")
             else:
                 lines.append(f"### {title}")
             lines.append("")
 
             # 章节小结
-            if config.show_chapter_summary:
+            if self.config.show_chapter_summary:
                 summary = chapter.get('summary', '')
                 if summary:
                     lines.append(f"> {summary}")
@@ -206,12 +209,23 @@ class MarkdownGenerator:
 class VideoProcessor:
     """视频处理器"""
 
-    def __init__(self):
+    def __init__(self, config_obj=None):
         """初始化处理器"""
-        self.subtitle_downloader = SubtitleDownloader()
+        self.config = config_obj if config_obj is not None else config
+        self.subtitle_downloader = SubtitleDownloader(self.config)
         self.asr_engine = None  # 延迟加载
-        self.verifier = create_verifier()
-        self.md_generator = MarkdownGenerator()
+        self.verifier = create_verifier(self.config)
+        self.md_generator = MarkdownGenerator(self.config)
+
+    def get_video_info(self, video_url: str) -> Optional[Dict]:
+        """获取视频信息（委托给 SubtitleDownloader）"""
+        return self.subtitle_downloader.get_video_info(video_url)
+
+    def cleanup(self):
+        """释放资源（卸载 ASR 模型等）"""
+        if self.asr_engine is not None:
+            self.asr_engine.unload()
+            self.asr_engine = None
 
     def process_video(
         self,
@@ -242,7 +256,7 @@ class VideoProcessor:
             logger.info("尝试下载字幕...")
             text = self.subtitle_downloader.download_subtitle(
                 video_url,
-                config.output_dir
+                self.config.output_dir
             )
 
             if text:
@@ -261,7 +275,7 @@ class VideoProcessor:
             logger.info("正在进行语音识别...")
             result = transcribe_video(
                 video_url,
-                config.output_dir,
+                self.config.output_dir,
                 self.asr_engine
             )
 
@@ -330,34 +344,47 @@ class VideoProcessor:
         total = len(videos)
         success = 0
         failed = 0
-        skipped = 0
+        max_workers = self.config.max_workers
 
-        logger.info(f"\n开始处理 {total} 个视频...")
+        logger.info(f"\n开始处理 {total} 个视频（max_workers={max_workers}）...")
 
-        for idx, video in enumerate(videos, 1):
-            logger.info(f"\n[{idx}/{total}]")
-
-            try:
-                result = self.process_video(video, force_asr)
-
-                if result:
-                    success += 1
-                else:
+        if max_workers <= 1:
+            # 串行处理
+            for idx, video in enumerate(videos, 1):
+                logger.info(f"\n[{idx}/{total}]")
+                try:
+                    if self.process_video(video, force_asr):
+                        success += 1
+                    else:
+                        failed += 1
+                    if idx < total:
+                        delay = self.config.delay_between_requests
+                        if delay > 0:
+                            time.sleep(delay)
+                except KeyboardInterrupt:
+                    logger.info("\n\n用户中断，正在退出...")
+                    break
+                except Exception as e:
+                    logger.error(f"处理出错: {e}")
                     failed += 1
-
-                # 请求间隔
-                if idx < total:
-                    delay = config.delay_between_requests
-                    if delay > 0:
-                        time.sleep(delay)
-
-            except KeyboardInterrupt:
-                logger.info("\n\n用户中断，正在退出...")
-                break
-            except Exception as e:
-                logger.error(f"处理出错: {e}")
-                failed += 1
-                continue
+                    continue
+        else:
+            # 并发处理
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_video = {
+                    executor.submit(self.process_video, video, force_asr): video
+                    for video in videos
+                }
+                for future in as_completed(future_to_video):
+                    video = future_to_video[future]
+                    try:
+                        if future.result():
+                            success += 1
+                        else:
+                            failed += 1
+                    except Exception as e:
+                        logger.error(f"处理出错 [{video.get('title', '')}]: {e}")
+                        failed += 1
 
         logger.info(f"\n{'='*60}")
         logger.info(f"处理完成！")
@@ -430,18 +457,17 @@ def main():
 
     try:
         # 判断是 UP 主还是单个视频
-        if '/video/' in args.url or 'BV' in args.url:
+        if is_single_video_url(args.url):
             # 单个视频
             logger.info("检测到单个视频")
 
-            downloader = SubtitleDownloader()
-            video_info = downloader.get_video_info(args.url)
+            processor = VideoProcessor()
+            video_info = processor.get_video_info(args.url)
 
             if not video_info:
                 logger.error("无法获取视频信息")
                 sys.exit(1)
 
-            processor = VideoProcessor()
             result = processor.process_video(video_info, args.asr)
 
             if result:
