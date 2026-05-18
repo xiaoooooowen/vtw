@@ -365,6 +365,10 @@ def convert_to_simplified(text: str) -> str:
         转换后的简体中文文本，如果 opencc 不可用则返回原文本
     """
     if not OPENCC_AVAILABLE:
+        import logging
+        logging.getLogger(__name__).warning(
+            "opencc 未安装，繁简转换已跳过。安装: pip install opencc"
+        )
         return text
 
     try:

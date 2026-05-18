@@ -9,3 +9,6 @@ openai>=1.0.0
 
 # HTTP 请求
 requests>=2.31.0
+
+# 繁简转换
+opencc>=1.0.0
